@@ -6,11 +6,12 @@ export JournaledSequence, mutate_sequence, reconstruct_sequence, is_similar, del
 
 # Structure to store journaled mutations
 struct JournaledSequence
-    parent::Union{Nothing, JournaledSequence}  # Reference to the previous version
-    changes::Dict{Int, Char}  # Dictionary: mutation position → new character
-    deletions::Set{Int}  # Set to track deletions
-    timestamp::Int  # Mutation timestamp
+  parent::Union{Nothing, JournaledSequence}
+  changes::Dict{Int, Char}
+  deletions::Dict{Int, Int}  # Stores {position → timestamp}
+  timestamp::Int
 end
+
 
 # Create the original sequence with no mutations
 function create_original_sequence()
@@ -40,35 +41,47 @@ end
 
 # Reconstruct the full sequence from journaled mutations
 function reconstruct_sequence(base_sequence::String, journaled_seq::JournaledSequence)
-    seq = collect(base_sequence)
-    current = journaled_seq
-    
-    while current.parent !== nothing
-        for (pos, char) in current.changes
-            seq[pos] = char
-        end
-        for pos in current.deletions
-            seq[pos] = '_'
-        end
-        current = current.parent  # Move to previous version
-    end
-    
-    seq = filter!(!=('_'::Char), seq)  # Remove deleted positions
-    return join(seq)
+  seq = collect(base_sequence)
+  mutation_map = Dict{Int, Char}()
+  deletion_set = Set{Int}()
+  
+  current = journaled_seq
+  while current.parent !== nothing
+      for (pos, char) in current.changes
+          if !haskey(mutation_map, pos)  # Keep the oldest change only
+              mutation_map[pos] = char
+          end
+      end
+      for pos in current.deletions
+          push!(deletion_set, pos)
+      end
+      current = current.parent
+  end
+  
+  # Apply mutations
+  for (pos, char) in mutation_map
+      seq[pos] = char
+  end
+  seq = filter(!in(deletion_set), seq)  # Remove deleted positions
+  return join(seq)
 end
 
-# List all mutations
+
 function list_all_mutations(journaled_seq::JournaledSequence)
-    mutations = Dict{Int, Char}()
-    current = journaled_seq
-    while current.parent !== nothing
-        for (pos, char) in current.changes
-            mutations[pos] = char
-        end
-        current = current.parent
-    end
-    return mutations
+  mutations = Dict{Int, Vector{Char}}()
+  current = journaled_seq
+  while current.parent !== nothing
+      for (pos, char) in current.changes
+          if !haskey(mutations, pos)
+              mutations[pos] = []
+          end
+          push!(mutations[pos], char)  # Store multiple changes
+      end
+      current = current.parent
+  end
+  return mutations
 end
+
 
 # Approximate search: Check if two sequences are similar
 function is_similar(seq1::String, seq2::String, threshold::Float64)
@@ -77,14 +90,17 @@ function is_similar(seq1::String, seq2::String, threshold::Float64)
 end
 
 # Find similar sequences in a collection
+using Base.Threads
+
 function find_similar_sequences(target_seq::String, sequences::Vector{String}, threshold::Float64)
-    similar_sequences = []
-    for seq in sequences
+    similar_sequences = Vector{String}()
+    @threads for seq in sequences
         if is_similar(target_seq, seq, threshold)
             push!(similar_sequences, seq)
         end
     end
     return similar_sequences
 end
+
 
 end  # End of module
